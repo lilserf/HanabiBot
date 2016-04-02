@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 
 namespace Hanabi
 {
+    /// <summary>
+    /// Suits in Hanabi!
+    /// </summary>
     public enum Suit
     {
         Red,
@@ -16,22 +19,19 @@ namespace Hanabi
         Rainbow
     }
 
+    /// <summary>
+    /// Represents a fully visible tile you can see
+    /// </summary>
     public class Tile
     {
-        const int FIRST = 0;
-        const int RED = 0;
-        const int GREEN = 1;
-        const int BLUE = 2;
-        const int YELLOW = 3;
-        const int WHITE = 4;
-        const int LAST_STANDARD = 4;
-        const int RAINBOW = 5;
-        const int LAST_RAINBOW = 4;
-
+        // Suit (red/green/blue/etc)
         public Suit Suit { get; private set; }
+        // Number on the tile
         public int Number { get; private set; }
+        // Unique ID of this tile so bots can say "that one"
         public Guid UniqueId { get; private set; }
 
+        // Constructor
         public Tile(Suit s, int n)
         {
             Suit = s;
@@ -39,17 +39,26 @@ namespace Hanabi
             UniqueId = Guid.NewGuid();
         }
 
+        /// <summary>
+        /// String representation of this tile
+        /// </summary>
         public override string ToString()
         {
             return System.Enum.GetName(typeof(Suit), Suit) + " " + Number;
         }
 
+        /// <summary>
+        /// Is this functionally the same tile as another (not actually the same tile, but same suit & number)?
+        /// </summary>
         public bool Same(Tile other)
         {
             return other.Suit == this.Suit && other.Number == this.Number;
         }
     }
 
+    /// <summary>
+    /// Used when grouping Tiles - compare whether they're copies of each other, not literally the same tile
+    /// </summary>
     public class TileComparer : IEqualityComparer<Tile>
     {
         bool IEqualityComparer<Tile>.Equals(Tile x, Tile y)

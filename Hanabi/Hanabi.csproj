@@ -55,7 +55,6 @@
     </ApplicationDefinition>
     <Compile Include="BotModules\InfoTrackerModule.cs" />
     <Compile Include="BotModules\UnknownTile.cs" />
-    <Compile Include="DummyPlayer.cs" />
     <Compile Include="GameState.cs" />
     <Compile Include="InfoGiverBot.cs" />
     <Compile Include="Tile.cs" />

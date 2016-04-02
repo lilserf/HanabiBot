@@ -9,20 +9,24 @@ namespace Hanabi
     /// <summary>
     /// Bookkeeping helper class that tracks game state and info being given and tries to narrow
     /// down what each player knows about tiles in their hand
+    /// 
+    /// TODO: This is starting to be the whole bot when it was originally intended as a helper. Oops.
     /// </summary>
     class InfoTrackerModule
     {
         /// <summary>
-        /// Dictionary of what is known about every tile in the game by that tile's owner
+        /// Dictionary of what is known about every tile in the game by *that tile's owner*
         /// </summary>
         Dictionary<Guid, UnknownTile> m_infoLookup;
 
-
         /// <summary>
-        /// Most recent game state
+        /// Most recent game state received in Update()
         /// </summary>
         GameState m_lastGameState;
 
+        /// <summary>
+        /// Our own player index
+        /// </summary>
         public int PlayerIndex { get; set; }
 
         // Strength to add to the newest tile included in an info give
@@ -35,8 +39,9 @@ namespace Hanabi
         // Strength value required to play a tile when we're at 2 fuses
         const int DANGER_STRENGTH_TO_PLAY = 50;
 
-        
+        // Each playable tile in a possible info give adds this much to the info's fitness
         const int INFO_PLAYABLE_FITNESS = 20;
+        // Each unplayable tile in a possible info give adds this much to the info's fitness
         const int INFO_UNPLAYABLE_FITNESS = -10;
 
         /// <summary>
@@ -76,6 +81,7 @@ namespace Hanabi
             // Batch up all the visible tiles
             visible.AddRange(gs.Discard);
             visible.AddRange(gs.Play);
+            // Add tiles visible to that player in other hands
             foreach(var hand in gs.Hands)
             {
                 if(hand.Key != viewpoint)
@@ -183,7 +189,6 @@ namespace Hanabi
         /// <summary>
         /// What is the current strength required to actually play a tile?
         /// </summary>
-        /// <returns></returns>
         int GetCurrentPlayStrength()
         {
             if(m_lastGameState.Tokens < 2)
@@ -251,6 +256,7 @@ namespace Hanabi
                 case PlayerAction.PlayerActionType.Info:
                     {
                         List<Guid> tiles = new List<Guid>();
+                        // Go through the tiles included in the give and record what we now know about them
                         foreach (Guid g in turn.TargetedTiles)
                         {
                             var lookup = Lookup(g);
@@ -299,16 +305,6 @@ namespace Hanabi
 
         }
 
-        private bool AlreadyKnows(Guid tileId, int number)
-        {
-            return Lookup(tileId).IsKnown(number);
-        }
-
-        private bool AlreadyKnows(Guid tileId, Suit suit)
-        {
-            return Lookup(tileId).IsKnown(suit);
-        }
-
         /// <summary>
         /// Get all the reasonable actions along with their "strength"
         /// </summary>
@@ -343,43 +339,44 @@ namespace Hanabi
             if (m_lastGameState.Tokens > 0)
             {
                 // Next see if there's valid info to give
-                // This is very naive
+                // This is pretty naive
                 var playable = GetAllPlayableTiles(m_lastGameState).OrderBy(t => t.Item2.Number);
 
                 foreach (var combo in playable)
                 {
-                    // TODO: Only give this info if no other player has already been told to play their copy of this tile
                     // Only give info if this tile hasn't had info given on it recently
                     var unknownTile = Lookup(combo.Item2.UniqueId);
-
-                    var otherCopies = m_lastGameState.AllHands().Where(t => t.Same(combo.Item2) && t.UniqueId != combo.Item2.UniqueId);
-
-                    bool otherCopiesInfoAlready = otherCopies.Any(t => Lookup(t).InfoAge >= 0);
                     bool noRecentInfo = (unknownTile.InfoAge == -1 || unknownTile.InfoAge > 20);
+
+                    // Only give this info if no other player has already been told to play their copy of this tile
+                    var otherCopies = m_lastGameState.AllHands().Where(t => t.Same(combo.Item2) && t.UniqueId != combo.Item2.UniqueId);
+                    bool otherCopiesInfoAlready = otherCopies.Any(t => Lookup(t).InfoAge >= 0);
 
                     if (noRecentInfo && !otherCopiesInfoAlready)
                     {
                         var playerIndex = combo.Item1;
+
+                        // Construct an action for giving number info for this tile
                         var numAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Number, playerIndex, combo.Item2.Number);
                         var numTiles = m_lastGameState.Hands[playerIndex].Where(t => t.Number == combo.Item2.Number);
                         var numPlayable = numTiles.Count(t => m_lastGameState.IsPlayable(t));
                         var numBad = numTiles.Count() - numPlayable;
-                        var numStrength = (INFO_PLAYABLE_FITNESS * numPlayable + INFO_UNPLAYABLE_FITNESS * numBad);
+                        var numFitness = (INFO_PLAYABLE_FITNESS * numPlayable + INFO_UNPLAYABLE_FITNESS * numBad);
 
+                        // Construct an action for giving suit info for this tile
                         var suitAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Suit, playerIndex, (int)combo.Item2.Suit);
                         var suitTiles = m_lastGameState.Hands[playerIndex].Where(t => t.Suit == combo.Item2.Suit);
                         var suitPlayable = suitTiles.Count(t => m_lastGameState.IsPlayable(t));
                         var suitBad = suitTiles.Count() - suitPlayable;
-                        var suitStrength = (INFO_PLAYABLE_FITNESS * suitPlayable + INFO_UNPLAYABLE_FITNESS * suitBad);
+                        var suitFitness = (INFO_PLAYABLE_FITNESS * suitPlayable + INFO_UNPLAYABLE_FITNESS * suitBad);
 
-                        // TODO: what strength should info on a playable tile be?
-                        if(numStrength > suitStrength)
+                        if(numFitness > suitFitness)
                         {
-                            yield return new Tuple<int, PlayerAction>(numStrength, numAction);
+                            yield return new Tuple<int, PlayerAction>(numFitness, numAction);
                         }
                         else
                         {
-                            yield return new Tuple<int, PlayerAction>(suitStrength, suitAction);
+                            yield return new Tuple<int, PlayerAction>(suitFitness, suitAction);
                         }
                     }
                 }
@@ -398,11 +395,17 @@ namespace Hanabi
             else
             {
                 // Give totally arbitrary info
+                // This should maybe try to at least indicate a definitely-unplayable tile or something
+                // This logic is currently responsible for most of our 3-Fuse endgames
                 var arbitraryInfoAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Suit, m_lastGameState.Hands.Keys.First(), (int)m_lastGameState.Hands.Values.First().First().Suit);
                 yield return new Tuple<int, PlayerAction>(0, arbitraryInfoAction);
             }
         }
 
+        /// <summary>
+        /// Get all possible actions we could take, sorted by fitness
+        /// But don't return the fitness to the caller, that's internal info
+        /// </summary>
         public IEnumerable<PlayerAction> GetBestActions()
         {
             var list = GetAllActions();

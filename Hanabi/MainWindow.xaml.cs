@@ -17,6 +17,8 @@ namespace Hanabi
 {
     /// <summary>
     /// Interaction logic for MainWindow.xaml
+    /// Yes, it's stupid that this is a WPF app but I'm not using the WPF part
+    /// Eventually I want to show stuff in the WPF window but I just haven't bothered yet
     /// </summary>
     public partial class MainWindow : Window
     {
@@ -24,19 +26,25 @@ namespace Hanabi
         {
             InitializeComponent();
 
+            // How many games to play
             int numGames = 1000;
 
+            // Remember how many times we scored each score
             Dictionary<int, int> Scores = new Dictionary<int,int>();
+            // Remember how many times the game ended for each reason
             Dictionary<GameOutcome.GameEndReason, int> EndReasons = new Dictionary<GameOutcome.GameEndReason, int>();
 
             // TODO: use the windows temp folder
             String folder = "d:\\temp\\hanabi\\"+DateTime.Now.ToString("yyyy_MM_dd_H_mm_ss");
 
+            // Looooop
             for (int i = 0; i < numGames; i++)
             {
+                // Just create a new game every time for no risk of pollution
                 Game game = new Game(folder, i);
                 game.LogEnabled = true;
 
+                // Add 5 copies of our only current bot
                 game.AddPlayer(new InfoGiverBot());
                 game.AddPlayer(new InfoGiverBot());
                 game.AddPlayer(new InfoGiverBot());
@@ -45,7 +53,10 @@ namespace Hanabi
 
                 try
                 {
+                    // Run this game and get the outcome!
                     var outcome = game.RunGame();
+
+                    // Add this score to our bookkeeping
                     if(Scores.ContainsKey(outcome.Points))
                     {
                         Scores[outcome.Points]++;
@@ -55,6 +66,7 @@ namespace Hanabi
                         Scores[outcome.Points] = 1;
                     }
                     
+                    // Add this game end reason to our bookkeeping
                     if(EndReasons.ContainsKey(outcome.EndReason))
                     {
                         EndReasons[outcome.EndReason]++;
@@ -67,7 +79,9 @@ namespace Hanabi
                 }
                 catch(Exception ex)
                 {
+                    // A bot tried to do something disallowed and the game crapped out
                     Console.WriteLine("Game "+i+": "+ex.Message);
+                    // Re-throw this exception to break to debugger if we're logging to console (basically, if we're debugging)
                     if(game.LogToConsole)
                     {
                         throw ex;
@@ -75,12 +89,19 @@ namespace Hanabi
                 }
             }
 
+            // Count how many games we played
             int count = Scores.Values.Aggregate(0, (t, c) => t += c);
+            // Total scores we achieved
             int total = Scores.Aggregate(0, (t, kvp) => t += kvp.Key * kvp.Value);
+            // Minimum score we got
             int min = Scores.Min(kvp => kvp.Key);
+            // Maximum score we got
             int max = Scores.Max(kvp => kvp.Key);
+            
+            // Average score
             float mean = (float)total / count;
 
+            // Build an ordered list of scores to find the median
             List<int> scoreList = new List<int>();
             foreach(var entry in Scores.OrderBy(k => k.Key))
             {
@@ -89,9 +110,9 @@ namespace Hanabi
                     scoreList.Add(entry.Key);
                 }
             }
-
             int median = scoreList.ElementAt(count / 2);
 
+            // Finally, write out the stats for this game, in pastable-into-Excel format
             Console.WriteLine("GAMES\t" + count);
             Console.WriteLine();
             for (int i = 0; i <= 30; i++)

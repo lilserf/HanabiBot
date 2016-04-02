@@ -9,7 +9,9 @@ namespace Hanabi
 {
 
  
-
+    /// <summary>
+    /// Main class for running a game of Hanabi
+    /// </summary>
     public class Game
     {
         // Numbers for the tiles in each suit
@@ -38,7 +40,7 @@ namespace Hanabi
         int m_fuses = 0;
         // Number of tokens
         int m_tokens = 8;
-        // Print extra debug info
+        // Print extra debug info?
         public bool LogEnabled = false;
         // Log to the console?
         public bool LogToConsole = false;
@@ -46,9 +48,12 @@ namespace Hanabi
         private int m_gameId;
         // Log file writer
         private StreamWriter m_logFile;
-        // Filename
+        // Log filename
         private string m_fileName;
 
+        /// <summary>
+        /// Static constructor - initialize the mapping of numplayers-to-numtilesinhand
+        /// </summary>
         static Game()
         {
             TilesPerPlayer = new Dictionary<int, int>()
@@ -67,9 +72,14 @@ namespace Hanabi
         {
             m_gameId = gameId;
 
+            // Log filename is the game ID
             m_fileName = String.Format("{0}\\{1:d5}.txt", baseDir, m_gameId);
+            // Make sure the output dir exists
             Directory.CreateDirectory(Path.GetDirectoryName(m_fileName));
+            // Open the log
             m_logFile = new StreamWriter(m_fileName);
+
+            // Setup a new game!
             SetupNewGame();
         }
 
@@ -144,25 +154,37 @@ namespace Hanabi
                 }
             }
 
+            // Game shouldn't be over already, but why not
             var possibleGameOver = GameOver();
+
             while (possibleGameOver == GameOutcome.GameEndReason.NotEnded)
             {
+                // Print this turn's game state
                 Log("\n=========================================");
                 LogGameState();
                 ProcessTurn();
+                // Is the game over NOW?
                 possibleGameOver = GameOver();
             }
 
+            // Add up our points!
             var points = m_nextPlay.Values.Aggregate(0, (t, i) => t += i - 1);
             Log("GAME OVER!");
             Log(points + " points!");
 
+            // Close the log
             m_logFile.Close();
+            // Now append _X_Y to the filename, where X is the points scored and Y is the reason the game ended
             var newFileName = Path.Combine(Path.GetDirectoryName(m_fileName), Path.GetFileNameWithoutExtension(m_fileName)+"_"+points+"_"+possibleGameOver+Path.GetExtension(m_fileName));
             File.Move(m_fileName, newFileName);
+            // Return the results
             return new GameOutcome { Points = points, EndReason = possibleGameOver };
         }
 
+        /// <summary>
+        /// Log a message to the console or our log file
+        /// </summary>
+        /// <param name="message"></param>
         private void Log(String message)
         {
             if(LogEnabled)
@@ -232,7 +254,7 @@ namespace Hanabi
         }
 
         /// <summary>
-        /// Draw a tile to the provided hand
+        /// Helper - draw a tile to the provided hand
         /// </summary>
         private void DrawToHand(List<Tile> hand)
         {
@@ -278,6 +300,7 @@ namespace Hanabi
         /// </summary>
         private void ProcessTurn()
         {
+            // Give each player the latest gamestate from their perspective
             foreach(var p in m_players)
             {
                 var gameState = GetGameState(p.Key);
@@ -286,7 +309,7 @@ namespace Hanabi
 
             IPlayer currPlayer = m_players[m_currPlayerIndex];
 
-            // Give player the game state and receive an action choice
+            // Give the current player the game state and receive an action choice
             PlayerAction action = currPlayer.TakeTurn();
 
             // Do the action
@@ -296,8 +319,13 @@ namespace Hanabi
             NextPlayer();
         }
 
+        /// <summary>
+        /// Try to play the given tile
+        /// Gives back a token if a 5 is played
+        /// </summary>
         private void AttemptPlayTile(Tile tile)
         {
+            // If it's playable
             if(m_nextPlay[tile.Suit] == tile.Number)
             {
                 m_nextPlay[tile.Suit]++;
@@ -317,14 +345,22 @@ namespace Hanabi
             }
         }
 
+        /// <summary>
+        /// Discard the given tile
+        /// Does NOT give back a token
+        /// </summary>
         private void DiscardTile(Tile tile)
         {
             m_discard.Enqueue(tile);
             Log("Tile [" + tile.Suit + " " + tile.Number + "] discarded!");
         }
 
+        /// <summary>
+        /// Execute the given player action
+        /// </summary>
         private void ExecuteAction(PlayerAction action)
         {
+            // If our bot did something invalid, bail on this game
             if(action.ActionType == PlayerAction.PlayerActionType.Invalid)
             {
                 LogGameState();
@@ -334,17 +370,45 @@ namespace Hanabi
             IPlayer currPlayer = m_players[m_currPlayerIndex];
             List<Tile> currHand = m_hands[m_currPlayerIndex];
 
+            // Construct a Turn to put in our history
             Turn thisTurn = new Turn();
             thisTurn.Action = action;
 
+            // If this is an Info action, go ahead and construct the list of tiles it targets
+            if (action.ActionType == PlayerAction.PlayerActionType.Info)
+            {
+                var targetHand = m_hands[action.TargetPlayer];
+
+                thisTurn.TargetedTiles = new List<Guid>();
+                if (action.InfoType == PlayerAction.PlayerActionInfoType.Number)
+                {
+                    thisTurn.TargetedTiles.AddRange(targetHand.Where(t => t.Number == action.Info).Select(t => t.UniqueId));
+                }
+                else if (action.InfoType == PlayerAction.PlayerActionInfoType.Suit)
+                {
+                    thisTurn.TargetedTiles.AddRange(targetHand.Where(t => t.Suit == (Suit)action.Info).Select(t => t.UniqueId));
+                }
+            }
+
+            // Log the player's action
+            String tiles = "";
+            if (thisTurn.TargetedTiles != null && thisTurn.TargetedTiles.Any())
+            {
+                tiles += " at " + thisTurn.TargetedTiles.Aggregate("", (s, g) => s += g + " ");
+            }
+            Log("\nPLAYER " + currPlayer.PlayerIndex + ": \"" + thisTurn.Action + tiles + ".\"");
+
+            // Now process that action
             switch(action.ActionType)
             {
                 case PlayerAction.PlayerActionType.Discard:
                     {
+                        // If we try to discard with 8 tokens, bail on this game
                         if (m_tokens == 8)
                         {
                             throw new InvalidOperationException("Can't discard with 8 tokens");
                         }
+                        // Do it!
                         Tile toDiscard = currHand.First(t => t.UniqueId == action.TileId);
                         currHand.Remove(toDiscard);
                         DiscardTile(toDiscard);
@@ -354,6 +418,7 @@ namespace Hanabi
                     break;
                 case PlayerAction.PlayerActionType.Play:
                     {
+                        // Try to play the tile
                         Tile toPlay = currHand.First(t => t.UniqueId == action.TileId);
                         currHand.Remove(toPlay);
                         AttemptPlayTile(toPlay);
@@ -362,34 +427,20 @@ namespace Hanabi
                     break;
                 case PlayerAction.PlayerActionType.Info:
                     {
+                        // If we try to give info when we can't, bail on this game
                         if (m_tokens == 0)
                         {
                             throw new InvalidOperationException("Can't give info with 0 tokens");
                         }
+                        // Use up a token
                         m_tokens--;
 
-                        var targetHand = m_hands[action.TargetPlayer];
-                        
-                        thisTurn.TargetedTiles = new List<Guid>();
-                        if(action.InfoType == PlayerAction.PlayerActionInfoType.Number)
-                        {
-                            thisTurn.TargetedTiles.AddRange(targetHand.Where(t => t.Number == action.Info).Select(t => t.UniqueId));
-                        }
-                        else if(action.InfoType == PlayerAction.PlayerActionInfoType.Suit)
-                        {
-                            thisTurn.TargetedTiles.AddRange(targetHand.Where(t => t.Suit == (Suit)action.Info).Select(t => t.UniqueId));
-                        }
                     }
                     break;
             }
 
+            // Finally add this turn's data to the history
             m_history.Add(thisTurn);
-            String tiles = "";
-            if(thisTurn.TargetedTiles != null && thisTurn.TargetedTiles.Any())
-            {
-                tiles += " at " + thisTurn.TargetedTiles.Aggregate("", (s, g) => s += g + " ");
-            }
-            Log("\nPLAYER " + currPlayer.PlayerIndex + ": \"" + thisTurn.Action + tiles + ".\"");
 
         }
     }

@@ -7,10 +7,15 @@ using System.Threading.Tasks;
 namespace Hanabi
 {
  
+    /// <summary>
+    /// Struct that describes an action a player can take
+    /// </summary>
     public struct PlayerAction
     {
+        // Misc constant used for invalid fields
         public const int INVALID = -1;
 
+        // Type of action being taken
         public enum PlayerActionType
         {
             Invalid,
@@ -19,6 +24,7 @@ namespace Hanabi
             Info
         }
 
+        // Type of info being given
         public enum PlayerActionInfoType
         {
             Invalid,
@@ -44,6 +50,9 @@ namespace Hanabi
         // Suit or number of tile (if PlayerActionType.Info)
         public int Info;
 
+        /// <summary>
+        /// Static helper - construct a PlayerAction where player A plays tile B
+        /// </summary>
         public static PlayerAction PlayTile(int actingPlayer, Guid tileId)
         {
             PlayerAction pa = new PlayerAction();
@@ -56,6 +65,9 @@ namespace Hanabi
             return pa;
         }
 
+        /// <summary>
+        /// Static helper - construct a PlayerAction where player A discards tile B
+        /// </summary>
         public static PlayerAction DiscardTile(int actingPlayer, Guid tileId)
         {
             PlayerAction pa = new PlayerAction();
@@ -68,6 +80,9 @@ namespace Hanabi
             return pa;
         }
 
+        /// <summary>
+        /// Static helper - construct a PlayerAction where player A gives player B info C of type D
+        /// </summary>
         public static PlayerAction GiveInfo(int actingPlayer, PlayerActionInfoType infoType, int targetPlayer, int info)
         {
             PlayerAction pa = new PlayerAction();
@@ -80,6 +95,9 @@ namespace Hanabi
             return pa;
         }
 
+        /// <summary>
+        /// Describe this action
+        /// </summary>
         public override string ToString()
         {
             switch(ActionType)
@@ -111,83 +129,24 @@ namespace Hanabi
         }
     }
 
-    /*
-    public class PlayerActionInfoSuit : IPlayerAction
-    {
-        public readonly int TargetPlayerIndex;
-        public readonly Suit Suit;
-        public readonly IEnumerable<Guid> Tiles;
-
-        public PlayerActionInfoSuit(int playerIndex, Suit suit, IEnumerable<Guid> tiles)
-        {
-            TargetPlayerIndex = playerIndex;
-            Suit = suit;
-            Tiles = tiles;
-        }
-
-        public override string ToString()
-        {
-            return "Player " + TargetPlayerIndex + " has " + Suit + " at tiles " + Tiles.Aggregate("", (s, i) => s += i + " ");
-        }
-    }
-
-    public class PlayerActionInfoNumber : IPlayerAction
-    {
-        public readonly int TargetPlayerIndex;
-        public readonly int Number;
-        public readonly IEnumerable<Guid> Tiles;
-
-        public PlayerActionInfoNumber(int playerIndex, int number, IEnumerable<Guid> tiles)
-        {
-            TargetPlayerIndex = playerIndex;
-            Number = number;
-            Tiles = tiles;
-        }
-
-        public override string ToString()
-        {
-            return "Player " + TargetPlayerIndex + " has " + Number + " at tiles " + Tiles.Aggregate("", (s, i) => s += i + " ");
-        }
-    }
-
-    public class PlayerActionDiscard : IPlayerAction
-    {
-        public Guid TileId { get; set; }
-
-        public PlayerActionDiscard(Guid tileId)
-        {
-            TileId = tileId;
-        }
-
-        public override string ToString()
-        {
-            return "Discard tile " + TileId;
-        }
-    }
-
-    public class PlayerActionPlay : IPlayerAction
-    {
-        public Guid TileId { get; set; }
-
-        public PlayerActionPlay(Guid tileId)
-        {
-            TileId = tileId;
-        }
-
-        public override string ToString()
-        {
-            return "Play tile " + TileId;
-        }
-    }
-
-    */
-
+    /// <summary>
+    /// Interface for a Player
+    /// </summary>
     public interface IPlayer
     {
+        /// <summary>
+        /// Player Index for this player
+        /// </summary>
         int PlayerIndex { get; set; }
 
+        /// <summary>
+        /// Called each turn with the newest game state
+        /// </summary>
         void Update(GameState gameState);
 
+        /// <summary>
+        /// This bot needs to take a turn now
+        /// </summary>
         PlayerAction TakeTurn();
     }
 }
