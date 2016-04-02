@@ -29,6 +29,7 @@ namespace Hanabi
             Dictionary<int, int> Scores = new Dictionary<int,int>();
             Dictionary<GameOutcome.GameEndReason, int> EndReasons = new Dictionary<GameOutcome.GameEndReason, int>();
 
+            // TODO: use the windows temp folder
             String folder = "d:\\temp\\hanabi\\"+DateTime.Now.ToString("yyyy_MM_dd_H_mm_ss");
 
             for (int i = 0; i < numGames; i++)
