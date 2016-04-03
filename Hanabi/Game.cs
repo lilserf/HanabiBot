@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -364,7 +365,14 @@ namespace Hanabi
             if(action.ActionType == PlayerAction.PlayerActionType.Invalid)
             {
                 LogGameState();
-                throw new InvalidOperationException("Tried to play a null action!");
+                if (LogToConsole)
+                {
+                    Debug.Assert(false, "Tried to play a null action!");
+                }
+                else
+                {
+                    throw new InvalidOperationException("Tried to play a null action!");
+                }
             }
 
             IPlayer currPlayer = m_players[m_currPlayerIndex];
@@ -406,7 +414,14 @@ namespace Hanabi
                         // If we try to discard with 8 tokens, bail on this game
                         if (m_tokens == 8)
                         {
-                            throw new InvalidOperationException("Can't discard with 8 tokens");
+                            if (LogToConsole)
+                            {
+                                Debug.Assert(false, "Can't discard with 8 tokens");
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException("Can't discard with 8 tokens");
+                            }
                         }
                         // Do it!
                         Tile toDiscard = currHand.First(t => t.UniqueId == action.TileId);
@@ -430,7 +445,14 @@ namespace Hanabi
                         // If we try to give info when we can't, bail on this game
                         if (m_tokens == 0)
                         {
-                            throw new InvalidOperationException("Can't give info with 0 tokens");
+                            if (LogToConsole)
+                            {
+                                Debug.Assert(false, "Can't discard with 8 tokens");
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException("Can't give info with 0 tokens");
+                            }
                         }
                         // Use up a token
                         m_tokens--;

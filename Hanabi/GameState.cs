@@ -102,9 +102,17 @@ namespace Hanabi
         /// <summary>
         /// Is the given tile playable?
         /// </summary>
+        public bool IsPlayable(Suit s, int n)
+        {
+            return NextPlay[s] == n;
+        }
+
+        /// <summary>
+        /// Is the given tile playable?
+        /// </summary>
         public bool IsPlayable(Tile t)
         {
-            return NextPlay[t.Suit] == t.Number;
+            return IsPlayable(t.Suit, t.Number);
         }
 
         /// <summary>
@@ -113,6 +121,30 @@ namespace Hanabi
         public IEnumerable<Tile> AllHands()
         {
             return Hands.Values.Aggregate(new List<Tile>(), (l, h) => { l.AddRange(h); return l; });
+        }
+
+        
+        /// <summary>
+        /// Return the player index of the player holding the tile with this ID, or -1 if nobody's holding that tile
+        /// </summary>
+        public int WhoHas(Guid tileId)
+        {
+            if(YourHand.Contains(tileId))
+            {
+                return Viewpoint;
+            }
+            else
+            {
+                foreach(var hand in Hands)
+                {
+                    if(hand.Value.Any(t => t.UniqueId == tileId))
+                    {
+                        return hand.Key;
+                    }
+                }
+            }
+
+            return -1;
         }
     }
 }

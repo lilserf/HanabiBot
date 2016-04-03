@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -43,6 +44,7 @@ namespace Hanabi
                 // Just create a new game every time for no risk of pollution
                 Game game = new Game(folder, i);
                 game.LogEnabled = true;
+                game.LogToConsole = false;
 
                 // Add 5 copies of our only current bot
                 game.AddPlayer(new InfoGiverBot());
@@ -51,7 +53,7 @@ namespace Hanabi
                 game.AddPlayer(new InfoGiverBot());
                 game.AddPlayer(new InfoGiverBot());
 
-                try
+                //try
                 {
                     // Run this game and get the outcome!
                     var outcome = game.RunGame();
@@ -77,16 +79,13 @@ namespace Hanabi
                     }
                     
                 }
-                catch(Exception ex)
-                {
-                    // A bot tried to do something disallowed and the game crapped out
-                    Console.WriteLine("Game "+i+": "+ex.Message);
-                    // Re-throw this exception to break to debugger if we're logging to console (basically, if we're debugging)
-                    if(game.LogToConsole)
-                    {
-                        throw ex;
-                    }
-                }
+                //catch(Exception ex)
+                //{
+                //    // A bot tried to do something disallowed and the game crapped out
+                //    Console.WriteLine("Game "+i+": "+ex.Message);
+                //}
+
+                if (game.LogToConsole) break;
             }
 
             // Count how many games we played

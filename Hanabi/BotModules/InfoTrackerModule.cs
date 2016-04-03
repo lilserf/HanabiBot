@@ -6,6 +6,31 @@ using System.Threading.Tasks;
 
 namespace Hanabi
 {
+    using TileValue = Tuple<Suit, int>;
+    using TileValueList = List<Tuple<Suit, int>>;
+
+    /// <summary>
+    /// Struct for tracking finesses
+    /// </summary>
+    struct Finesse
+    {
+        // TODO: track whether the finessed tile actually got played or not
+        public Guid InfoTileId;
+        public Guid TargetTileId;
+
+        public TileValueList PossibleInfoValues;
+        public TileValueList PossibleTargetValues;
+
+        public Finesse(Guid infoTile, Guid targetTile, TileValueList infoValues, TileValueList targetValues)
+        {
+            InfoTileId = infoTile;
+            TargetTileId = targetTile;
+            PossibleInfoValues = infoValues;
+            PossibleTargetValues = targetValues;
+        }
+    }
+
+
     /// <summary>
     /// Bookkeeping helper class that tracks game state and info being given and tries to narrow
     /// down what each player knows about tiles in their hand
@@ -18,6 +43,11 @@ namespace Hanabi
         /// Dictionary of what is known about every tile in the game by *that tile's owner*
         /// </summary>
         Dictionary<Guid, UnknownTile> m_infoLookup;
+
+        /// <summary>
+        /// List of Finesses we're tracking
+        /// </summary>
+        List<Finesse> m_activeFinesses;
 
         /// <summary>
         /// Most recent game state received in Update()
@@ -50,19 +80,68 @@ namespace Hanabi
         public InfoTrackerModule()
         {
             m_infoLookup = new Dictionary<Guid, UnknownTile>();
+            m_activeFinesses = new List<Finesse>();
+        }
+
+
+        IEnumerable<Tile> GetPossibleFinesseTargets()
+        {
+            List<Tile> playableNewTiles = new List<Tile>();
+            foreach (var hand in m_lastGameState.Hands)
+            {
+                var newestTile = hand.Value.Last();
+
+                if (m_lastGameState.IsPlayable(newestTile))
+                {
+                    playableNewTiles.Add(newestTile);
+                }
+            }
+
+            return playableNewTiles;
+        }
+
+        IEnumerable<Tuple<int, Tile>> GetSimpleFinesses()
+        {
+            var playableNewTiles = GetPossibleFinesseTargets();
+
+            List<Tuple<int, Tile>> finesses = new List<Tuple<int, Tile>>();
+            foreach(var tile in playableNewTiles)
+            {
+                if(tile.Number < 5)
+                {
+                    int nextNumber = tile.Number + 1;
+                    int finessedPlayer = m_lastGameState.WhoHas(tile.UniqueId);
+
+                    foreach(var hand in m_lastGameState.Hands)
+                    {
+                        // Can't finesse you with a tile in your hand
+                        if(hand.Key != finessedPlayer)
+                        {
+                            var nextTile = hand.Value.Where(t => t.Suit == tile.Suit && t.Number == nextNumber).FirstOrDefault();
+
+                            if(nextTile != null)
+                            {
+                                finesses.Add(new Tuple<int, Tile>(hand.Key, nextTile));
+                            }
+                        }
+                    }
+                }
+            }
+
+            return finesses;
         }
 
         /// <summary>
         /// Get a list of all playable tiles in other players hands
         /// </summary>
-        IEnumerable<Tuple<int, Tile>> GetAllPlayableTiles(GameState gs)
+        IEnumerable<Tuple<int, Tile>> GetAllPlayableTiles()
         {
-            foreach(var hand in gs.Hands)
+            foreach (var hand in m_lastGameState.Hands)
             {
                 foreach(var tile in hand.Value)
                 {
                     // Is this playable?
-                    if(gs.IsPlayable(tile))
+                    if(m_lastGameState.IsPlayable(tile))
                     {
                         yield return new Tuple<int, Tile>(hand.Key, tile);
                     }
@@ -70,19 +149,20 @@ namespace Hanabi
             }
         }
 
+
         /// <summary>
         /// Get a list of all tiles that, from a given perspective, can be seen fully
         /// (and thus can't be in that player's hand)
         /// </summary>
-        IEnumerable<Tile> GetEliminatedTiles(GameState gs, int viewpoint)
+        IEnumerable<Tile> GetEliminatedTiles(int viewpoint)
         {
             var visible = new List<Tile>();
 
             // Batch up all the visible tiles
-            visible.AddRange(gs.Discard);
-            visible.AddRange(gs.Play);
+            visible.AddRange(m_lastGameState.Discard);
+            visible.AddRange(m_lastGameState.Play);
             // Add tiles visible to that player in other hands
-            foreach(var hand in gs.Hands)
+            foreach (var hand in m_lastGameState.Hands)
             {
                 if(hand.Key != viewpoint)
                 {
@@ -107,14 +187,14 @@ namespace Hanabi
                     // Can see the single 5
                     eliminated.Add(g.Key);
                 }
-                else if (g.Count() >= 2)
+                else if ((g.Key.Number == 2 || g.Key.Number == 3 || g.Key.Number == 4) && g.Count() >= 2)
                 {
                     // Can see both copies of a 2/3/4
                     eliminated.Add(g.Key);
                 }
             }
 
-            return eliminated;
+            return eliminated.OrderBy(t => t.Number).OrderBy(t => t.Suit);
         }
 
         /// <summary>
@@ -144,16 +224,18 @@ namespace Hanabi
         {
             m_lastGameState = gameState;
 
+            // TODO: delete finesses from m_activeFinesses if they no longer apply
+
             foreach(var hand in gameState.Hands)
             {
                 // Look at the gamestate and cross out any tiles that are eliminated
                 // from the perspective of that player
-                var eliminatedTiles = GetEliminatedTiles(gameState, hand.Key);
+                var eliminatedTiles = GetEliminatedTiles(hand.Key);
 
                 foreach(var tile in hand.Value)
                 {
                     var lookup = Lookup(tile);
-                    lookup.CannotBe(eliminatedTiles);
+                    lookup.CannotBe(eliminatedTiles, "Eliminated tiles");
                 }
             }
             
@@ -161,7 +243,7 @@ namespace Hanabi
             foreach (var guid in gameState.YourHand)
             {
                 var lookup = Lookup(guid);
-                lookup.CannotBe(GetEliminatedTiles(gameState, PlayerIndex));
+                lookup.CannotBe(GetEliminatedTiles(PlayerIndex), "Eliminated tiles");
             }
 
             if (m_lastGameState.History.Any())
@@ -191,7 +273,7 @@ namespace Hanabi
         /// </summary>
         int GetCurrentPlayStrength()
         {
-            if(m_lastGameState.Tokens < 2)
+            if(m_lastGameState.Fuses < 2)
             {
                 return SAFE_STRENGTH_TO_PLAY;
             }
@@ -263,12 +345,12 @@ namespace Hanabi
 
                             if (turn.Action.InfoType == PlayerAction.PlayerActionInfoType.Suit)
                             {
-                                lookup.MustBe((Suit)turn.Action.Info);
+                                lookup.MustBe((Suit)turn.Action.Info, "Given Info");
                                 lookup.GotInfo();
                             }
                             else if (turn.Action.InfoType == PlayerAction.PlayerActionInfoType.Number)
                             {
-                                lookup.MustBe(turn.Action.Info);
+                                lookup.MustBe(turn.Action.Info, "Given Info");
                                 lookup.GotInfo();
                             }
 
@@ -276,6 +358,75 @@ namespace Hanabi
                             if(lookup.IsPossiblyPlayable(m_lastGameState))
                             {
                                 tiles.Add(g);
+                            }
+                        }
+
+                        if (turn.Action.TargetPlayer == PlayerIndex)
+                        {
+                            // Info was given to you, double check if it might be a finesse
+                            var finesseTargets = GetPossibleFinesseTargets();
+
+                            // TODO: it can't be a finesse if the target tile is in the info-giver's hand
+
+                            // If there are possible finesses
+                            if(finesseTargets.Any())
+                            {
+                                // Possible values our info could have if they're finessing each target
+                                var infoValueList = finesseTargets.Select(t => new TileValue(t.Suit, t.Number + 1)).ToList();
+
+                                foreach(var infoTarget in turn.TargetedTiles)
+                                {
+                                    foreach(var finesseTarget in finesseTargets)
+                                    {
+                                        var targetValueList = new TileValueList();
+                                        targetValueList.Add(new TileValue(finesseTarget.Suit, finesseTarget.Number));
+
+                                        var finesse = new Finesse(infoTarget, finesseTarget.UniqueId, infoValueList, targetValueList);
+                                        m_activeFinesses.Add(finesse);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Info was given to someone else, see if you're being finessed
+
+                            var actualTiles = turn.TargetedTiles.Select(g => m_lastGameState.AllHands().First(t => t.UniqueId == g));
+
+                            // If this info give is all unplayable tiles, it's gotta be a finesse
+                            if (!actualTiles.Any(t => m_lastGameState.IsPlayable(t)))
+                            {
+                                var finesseTargets = GetPossibleFinesseTargets();
+                                var missingTargets = new List<Tile>();
+
+                                foreach (var target in turn.TargetedTiles)
+                                {
+                                    // Find this info tile
+                                    var infoTile = m_lastGameState.AllHands().Where(t => t.UniqueId == target).First();
+                                    // See if the finesse targets list contains a corresponding tile
+                                    var finesseTarget = finesseTargets.Where(t => t.Suit == infoTile.Suit && t.Number == infoTile.Number - 1).FirstOrDefault();
+
+                                    var infoValues = new TileValueList();
+                                    infoValues.Add(new TileValue(infoTile.Suit, infoTile.Number));
+
+                                    if (finesseTarget != null)
+                                    {
+                                        var targetValues = new TileValueList();
+                                        targetValues.Add(new TileValue(finesseTarget.Suit, finesseTarget.Number));
+                                        var finesse = new Finesse(infoTile.UniqueId, finesseTarget.UniqueId, infoValues, targetValues);
+                                        m_activeFinesses.Add(finesse);
+                                    }
+                                    else
+                                    {
+                                        // We must have the target!
+                                        var myNewest = m_lastGameState.YourHand.Last();
+                                        var targetValues = new TileValueList();
+                                        targetValues.Add(new TileValue(infoTile.Suit, infoTile.Number-1));
+                                        var finesse = new Finesse(infoTile.UniqueId, myNewest, infoValues, targetValues);
+                                        m_activeFinesses.Add(finesse);
+                                    }
+                                }
+
                             }
                         }
 
@@ -292,17 +443,62 @@ namespace Hanabi
 
                             if (turn.Action.InfoType == PlayerAction.PlayerActionInfoType.Suit)
                             {
-                                lookup.CannotBe((Suit)turn.Action.Info);
+                                lookup.CannotBe((Suit)turn.Action.Info, "Negative info");
                             }
                             else if (turn.Action.InfoType == PlayerAction.PlayerActionInfoType.Number)
                             {
-                                lookup.CannotBe(turn.Action.Info);
+                                lookup.CannotBe(turn.Action.Info, "Negative info");
                             }
                         }
                     }
                     break;
             }
 
+        }
+
+        /// <summary>
+        /// Given a tile we want to give info on, evaluate the relative strengths of suit vs number info for that tile
+        /// and return whichever is better
+        /// </summary>
+        private Tuple<int, PlayerAction> ChooseBestInfoForTile(int playerIndex, Tile tile, string log)
+        {
+            // Only give info if this tile hasn't had info given on it recently
+            var unknownTile = Lookup(tile);
+            bool noRecentInfo = (unknownTile.InfoAge == -1 || unknownTile.InfoAge > 20);
+
+            // Only give this info if no other player has already been told to play their copy of this tile
+            var otherCopies = m_lastGameState.AllHands().Where(t => t.Same(tile) && t.UniqueId != tile.UniqueId);
+            bool otherCopiesInfoAlready = otherCopies.Any(t => Lookup(t).InfoAge >= 0);
+
+            Tuple<int, PlayerAction> bestAction = null;
+
+            if (noRecentInfo && !otherCopiesInfoAlready)
+            {
+                // Construct an action for giving number info for this tile
+                var numAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Number, playerIndex, tile.Number, log);
+                var numTiles = m_lastGameState.Hands[playerIndex].Where(t => t.Number == tile.Number);
+                var numPlayable = numTiles.Count(t => m_lastGameState.IsPlayable(t));
+                var numBad = numTiles.Count() - numPlayable;
+                var numFitness = (INFO_PLAYABLE_FITNESS * numPlayable + INFO_UNPLAYABLE_FITNESS * numBad);
+
+                // Construct an action for giving suit info for this tile
+                var suitAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Suit, playerIndex, (int)tile.Suit, log);
+                var suitTiles = m_lastGameState.Hands[playerIndex].Where(t => t.Suit == tile.Suit);
+                var suitPlayable = suitTiles.Count(t => m_lastGameState.IsPlayable(t));
+                var suitBad = suitTiles.Count() - suitPlayable;
+                var suitFitness = (INFO_PLAYABLE_FITNESS * suitPlayable + INFO_UNPLAYABLE_FITNESS * suitBad);
+
+                if (numFitness > suitFitness)
+                {
+                    bestAction = new Tuple<int, PlayerAction>(numFitness, numAction);
+                }
+                else
+                {
+                    bestAction = new Tuple<int, PlayerAction>(suitFitness, suitAction);
+                }
+            }
+
+            return bestAction;
         }
 
         /// <summary>
@@ -315,10 +511,43 @@ namespace Hanabi
             ///////////////////////////////////////////////////
             foreach(Guid g in TilesInHand(PlayerIndex))
             {
-                var lookup = Lookup(g);
-                if (lookup.PlayStrength >= GetCurrentPlayStrength())
+                // Finesses
+                
+                var finesseTargetsInOurHand = m_activeFinesses.Where(f => m_lastGameState.YourHand.Contains(f.TargetTileId));
+
+                if(finesseTargetsInOurHand.Any())
                 {
-                    var playAction = PlayerAction.PlayTile(PlayerIndex, g);
+                    var finesse = finesseTargetsInOurHand.First();
+
+                    if(finesse.PossibleTargetValues.All(v => m_lastGameState.IsPlayable(v.Item1, v.Item2)))
+                    {
+                        var infoString = finesse.PossibleInfoValues.Aggregate("", (s, t) => s += t.Item1 + " " + t.Item2+ ", ");
+                        var playAction = PlayerAction.PlayTile(PlayerIndex, finesse.TargetTileId, String.Format("Finessed by {0}", infoString));
+                        yield return new Tuple<int, PlayerAction>(80, playAction);
+                    }
+                }
+                
+                // Other Info
+
+                var lookup = Lookup(g);
+                // If this tile has been strongly messages OR we know it's definitely playable
+                bool playStrength = lookup.PlayStrength >= GetCurrentPlayStrength();
+                bool isUnplayable = lookup.IsUnplayable(m_lastGameState);
+                bool isPlayable = lookup.IsDefinitelyPlayable(m_lastGameState);
+                if (isPlayable || (playStrength && !isUnplayable))
+                {
+                    // TODO: Check to see if it's part of a finesse
+
+                    string log = "";
+                    if(isPlayable)
+                    {
+                        log = String.Format("This tile should be playable ({0})", lookup.ToString());
+                    }
+                    else
+                    {
+                        log = String.Format("PlayStrength is {0}", lookup.PlayStrength);
+                    }
+                    var playAction = PlayerAction.PlayTile(PlayerIndex, g, log);
                     yield return new Tuple<int, PlayerAction>(lookup.PlayStrength, playAction);
                 }
             }
@@ -338,46 +567,29 @@ namespace Hanabi
             // TODO: don't wait until 0 tokens, maybe
             if (m_lastGameState.Tokens > 0)
             {
+                var finesses = GetSimpleFinesses().OrderBy(t => t.Item2.Number);
+
+                foreach (var combo in finesses)
+                {
+                    var info = ChooseBestInfoForTile(combo.Item1, combo.Item2, "Finesse!");
+                    if (info != null)
+                    {
+                        // Add bonus strength for this being a finesse
+                        var newInfo = new Tuple<int, PlayerAction>(info.Item1 + 20, info.Item2);
+                        yield return newInfo;
+                    }
+                }
+
                 // Next see if there's valid info to give
                 // This is pretty naive
-                var playable = GetAllPlayableTiles(m_lastGameState).OrderBy(t => t.Item2.Number);
+                var playable = GetAllPlayableTiles().OrderBy(t => t.Item2.Number);
 
                 foreach (var combo in playable)
                 {
-                    // Only give info if this tile hasn't had info given on it recently
-                    var unknownTile = Lookup(combo.Item2.UniqueId);
-                    bool noRecentInfo = (unknownTile.InfoAge == -1 || unknownTile.InfoAge > 20);
-
-                    // Only give this info if no other player has already been told to play their copy of this tile
-                    var otherCopies = m_lastGameState.AllHands().Where(t => t.Same(combo.Item2) && t.UniqueId != combo.Item2.UniqueId);
-                    bool otherCopiesInfoAlready = otherCopies.Any(t => Lookup(t).InfoAge >= 0);
-
-                    if (noRecentInfo && !otherCopiesInfoAlready)
+                    var info = ChooseBestInfoForTile(combo.Item1, combo.Item2, "Playable");
+                    if (info != null)
                     {
-                        var playerIndex = combo.Item1;
-
-                        // Construct an action for giving number info for this tile
-                        var numAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Number, playerIndex, combo.Item2.Number);
-                        var numTiles = m_lastGameState.Hands[playerIndex].Where(t => t.Number == combo.Item2.Number);
-                        var numPlayable = numTiles.Count(t => m_lastGameState.IsPlayable(t));
-                        var numBad = numTiles.Count() - numPlayable;
-                        var numFitness = (INFO_PLAYABLE_FITNESS * numPlayable + INFO_UNPLAYABLE_FITNESS * numBad);
-
-                        // Construct an action for giving suit info for this tile
-                        var suitAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Suit, playerIndex, (int)combo.Item2.Suit);
-                        var suitTiles = m_lastGameState.Hands[playerIndex].Where(t => t.Suit == combo.Item2.Suit);
-                        var suitPlayable = suitTiles.Count(t => m_lastGameState.IsPlayable(t));
-                        var suitBad = suitTiles.Count() - suitPlayable;
-                        var suitFitness = (INFO_PLAYABLE_FITNESS * suitPlayable + INFO_UNPLAYABLE_FITNESS * suitBad);
-
-                        if(numFitness > suitFitness)
-                        {
-                            yield return new Tuple<int, PlayerAction>(numFitness, numAction);
-                        }
-                        else
-                        {
-                            yield return new Tuple<int, PlayerAction>(suitFitness, suitAction);
-                        }
+                        yield return info;
                     }
                 }
             }
@@ -389,7 +601,7 @@ namespace Hanabi
             if (m_lastGameState.Tokens < 8)
             {
                 // TODO: account for don't-discard info
-                var discardOldestAction = PlayerAction.DiscardTile(PlayerIndex, m_lastGameState.YourHand.First());
+                var discardOldestAction = PlayerAction.DiscardTile(PlayerIndex, m_lastGameState.YourHand.First(), "Discard oldest");
                 yield return new Tuple<int, PlayerAction>(1, discardOldestAction);
             }
             else
@@ -397,7 +609,11 @@ namespace Hanabi
                 // Give totally arbitrary info
                 // This should maybe try to at least indicate a definitely-unplayable tile or something
                 // This logic is currently responsible for most of our 3-Fuse endgames
-                var arbitraryInfoAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Suit, m_lastGameState.Hands.Keys.First(), (int)m_lastGameState.Hands.Values.First().First().Suit);
+
+                var leastPlayable = m_lastGameState.AllHands().OrderBy(t => t.Number).Last();
+                var owner = m_lastGameState.WhoHas(leastPlayable.UniqueId);
+
+                var arbitraryInfoAction = PlayerAction.GiveInfo(PlayerIndex, PlayerAction.PlayerActionInfoType.Number, owner, leastPlayable.Number, "Least playable thing I could find");
                 yield return new Tuple<int, PlayerAction>(0, arbitraryInfoAction);
             }
         }

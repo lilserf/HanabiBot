@@ -32,6 +32,9 @@ namespace Hanabi
             Number
         }
 
+        // String describing this action in the player's terms
+        public string LogString;
+
         // Acting player
         public int ActingPlayer;
 
@@ -53,7 +56,7 @@ namespace Hanabi
         /// <summary>
         /// Static helper - construct a PlayerAction where player A plays tile B
         /// </summary>
-        public static PlayerAction PlayTile(int actingPlayer, Guid tileId)
+        public static PlayerAction PlayTile(int actingPlayer, Guid tileId, string log)
         {
             PlayerAction pa = new PlayerAction();
             pa.ActingPlayer = actingPlayer;
@@ -62,13 +65,14 @@ namespace Hanabi
             pa.TargetPlayer = INVALID;
             pa.InfoType = PlayerActionInfoType.Invalid;
             pa.Info = INVALID;
+            pa.LogString = log;
             return pa;
         }
 
         /// <summary>
         /// Static helper - construct a PlayerAction where player A discards tile B
         /// </summary>
-        public static PlayerAction DiscardTile(int actingPlayer, Guid tileId)
+        public static PlayerAction DiscardTile(int actingPlayer, Guid tileId, string log)
         {
             PlayerAction pa = new PlayerAction();
             pa.ActingPlayer = actingPlayer;
@@ -77,13 +81,14 @@ namespace Hanabi
             pa.TargetPlayer = INVALID;
             pa.InfoType = PlayerActionInfoType.Invalid;
             pa.Info = INVALID;
+            pa.LogString = log;
             return pa;
         }
 
         /// <summary>
         /// Static helper - construct a PlayerAction where player A gives player B info C of type D
         /// </summary>
-        public static PlayerAction GiveInfo(int actingPlayer, PlayerActionInfoType infoType, int targetPlayer, int info)
+        public static PlayerAction GiveInfo(int actingPlayer, PlayerActionInfoType infoType, int targetPlayer, int info, string log)
         {
             PlayerAction pa = new PlayerAction();
             pa.ActingPlayer = actingPlayer;
@@ -92,6 +97,7 @@ namespace Hanabi
             pa.TargetPlayer = targetPlayer;
             pa.InfoType = infoType;
             pa.Info = info;
+            pa.LogString = log;
             return pa;
         }
 
@@ -104,11 +110,11 @@ namespace Hanabi
             {
                 case PlayerActionType.Play:
                     {
-                        return "Play tile " + TileId;
+                        return String.Format("Play tile {0} ({1})", TileId, LogString);
                     }
                 case PlayerActionType.Discard:
                     {
-                        return "Discard tile " + TileId;
+                        return String.Format("Discard tile {0} ({1})", TileId, LogString);
                     }
                 case PlayerActionType.Info:
                     {
@@ -121,10 +127,11 @@ namespace Hanabi
                         {
                             desc = "" + Info;
                         }
-                        return "Player " + TargetPlayer + " has " + desc;
+
+                        return String.Format("Player {0} has {1} ({2})", TargetPlayer, desc, LogString);
                     }
                 default:
-                    return "PlayerAction.ToString Error!";
+                    return String.Format("PlayerAction.ToString Error! ({0})", LogString);
             }
         }
     }
