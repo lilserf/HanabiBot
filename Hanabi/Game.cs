@@ -51,6 +51,9 @@ namespace Hanabi
         private StreamWriter m_logFile;
         // Log filename
         private string m_fileName;
+        // When the end of the game is triggered, we'll set the player who triggered it here
+        // Until then it'll be -1
+        private int m_lastTurnPlayer = -1;
 
         /// <summary>
         /// Static constructor - initialize the mapping of numplayers-to-numtilesinhand
@@ -212,6 +215,7 @@ namespace Hanabi
                 output += "[" + pile.Key + " " + (pile.Value-1) + "] ";
             }
             Log(output);
+            Log("Draw Pile: " + m_draw.Count());
             Log("Fuses: "+m_fuses);
             Log("Tokens: "+m_tokens);
 
@@ -232,22 +236,32 @@ namespace Hanabi
         /// <returns></returns>
         private GameOutcome.GameEndReason GameOver()
         {
+            int playerWhoJustActed = (m_currPlayerIndex + m_players.Count - 1) % m_players.Count;
+
             // If the draw pile is empty
-            if(m_draw.Count == 0)
+            if (m_draw.Count == 0 && m_lastTurnPlayer == -1)
             {
-                // TODO: handle that last round
+                m_lastTurnPlayer = playerWhoJustActed;
+                Log(String.Format("Draw pile empty! Player {0} will have the final turn.", m_lastTurnPlayer));
+                return GameOutcome.GameEndReason.NotEnded;
+            }
+            else if (m_lastTurnPlayer == playerWhoJustActed)
+            {
+                Log(String.Format("Final turn happened!"));
                 return GameOutcome.GameEndReason.EmptyDrawPile;
             }
 
             // If all piles are perfect
             if(m_nextPlay.All(p => p.Value == 6))
             {
+                Log(String.Format("!!!PERFECT GAME!!!"));
                 return GameOutcome.GameEndReason.PerfectGame;
             }
 
             // If we've blown 3 fuses
             if(m_fuses >= 3)
             {
+                Log(String.Format("*** KABOOM ***"));
                 return GameOutcome.GameEndReason.Fuses;
             }
 
@@ -259,7 +273,10 @@ namespace Hanabi
         /// </summary>
         private void DrawToHand(List<Tile> hand)
         {
-            hand.Add(m_draw.Dequeue());
+            if (m_draw.Count > 0)
+            {
+                hand.Add(m_draw.Dequeue());
+            }
         }
 
         /// <summary>
@@ -293,7 +310,7 @@ namespace Hanabi
                 }
             }
 
-            return new GameState(viewpoint, m_tokens, m_draw.ToList(), m_discard.ToList(), m_play.ToList(), yourHand, hands, m_nextPlay, m_fuses, m_history);
+            return new GameState(viewpoint, m_tokens, m_discard.ToList(), m_play.ToList(), yourHand, hands, m_nextPlay, m_fuses, m_history);
         }
 
         /// <summary>

@@ -46,12 +46,13 @@ namespace Hanabi
                 game.LogEnabled = true;
                 game.LogToConsole = false;
 
+                InfoGiverBotOptions opts = new InfoGiverBotOptions(true);
                 // Add 5 copies of our only current bot
-                game.AddPlayer(new InfoGiverBot());
-                game.AddPlayer(new InfoGiverBot());
-                game.AddPlayer(new InfoGiverBot());
-                game.AddPlayer(new InfoGiverBot());
-                game.AddPlayer(new InfoGiverBot());
+                game.AddPlayer(new InfoGiverBot(opts));
+                game.AddPlayer(new InfoGiverBot(opts));
+                game.AddPlayer(new InfoGiverBot(opts));
+                game.AddPlayer(new InfoGiverBot(opts));
+                game.AddPlayer(new InfoGiverBot(opts));
 
                 //try
                 {

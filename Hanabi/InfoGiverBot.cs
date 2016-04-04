@@ -6,6 +6,16 @@ using System.Threading.Tasks;
 
 namespace Hanabi
 {
+    struct InfoGiverBotOptions
+    {
+        public bool Finesse;
+
+        public InfoGiverBotOptions(bool finesse = true)
+        {
+            Finesse = finesse;
+        }
+    }
+
     /// <summary>
     /// Bot that uses the InfoTrackerModule to manage its info
     /// </summary>
@@ -15,6 +25,11 @@ namespace Hanabi
         /// Info tracker module
         /// </summary>
         private InfoTrackerModule m_infoTracker;
+
+        /// <summary>
+        /// Options
+        /// </summary>
+        private InfoGiverBotOptions m_options;
 
         /// <summary>
         /// What's our player index?
@@ -28,9 +43,10 @@ namespace Hanabi
         /// <summary>
         /// Constructor
         /// </summary>
-        public InfoGiverBot()
+        public InfoGiverBot(InfoGiverBotOptions options)
         {
-            m_infoTracker = new InfoTrackerModule();
+            m_options = options;
+            m_infoTracker = new InfoTrackerModule(m_options.Finesse);
         }
 
         /// <summary>

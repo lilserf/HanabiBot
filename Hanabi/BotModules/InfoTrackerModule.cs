@@ -15,18 +15,42 @@ namespace Hanabi
     struct Finesse
     {
         // TODO: track whether the finessed tile actually got played or not
+
+        // When we are finessed:
+        // 1: Remember what we think we have
+        // 2: Play the finessed tile
+
+        // When we are given info to finesse someone else:
+        // 1: Remember what we think we have
+        // 2: Don't play yet
+        // 3: Watch to see if the finessed person plays
+        // 3b: Maybe see if they got any other info on that tile
+        // 4: If they do, we definitely have the tile we thought
+        // 5: If they don't, forget about this finesse
+
         public Guid InfoTileId;
         public Guid TargetTileId;
 
         public TileValueList PossibleInfoValues;
         public TileValueList PossibleTargetValues;
 
-        public Finesse(Guid infoTile, Guid targetTile, TileValueList infoValues, TileValueList targetValues)
+        public int GivingPlayer;
+        public int TurnGiven;
+        public int TargetedPlayer;
+        public int TurnTargetShouldAct;
+
+        public Finesse(GameState gs, Guid infoTile, Guid targetTile, TileValueList infoValues, TileValueList targetValues, int turn, int givingPlayer)
         {
             InfoTileId = infoTile;
             TargetTileId = targetTile;
             PossibleInfoValues = infoValues;
             PossibleTargetValues = targetValues;
+            TurnGiven = turn;
+            GivingPlayer = givingPlayer;
+            TargetedPlayer = gs.WhoHas(targetTile);
+
+            int turnDifference = ((TargetedPlayer < GivingPlayer) ? TargetedPlayer + gs.NumPlayers : TargetedPlayer) - GivingPlayer;
+            TurnTargetShouldAct = TurnGiven + turnDifference;
         }
     }
 
@@ -48,6 +72,11 @@ namespace Hanabi
         /// List of Finesses we're tracking
         /// </summary>
         List<Finesse> m_activeFinesses;
+
+        /// <summary>
+        /// Are we doing finesses?
+        /// </summary>
+        bool m_allowFinesses;
 
         /// <summary>
         /// Most recent game state received in Update()
@@ -77,15 +106,20 @@ namespace Hanabi
         /// <summary>
         /// Constructor
         /// </summary>
-        public InfoTrackerModule()
+        public InfoTrackerModule(bool finesse)
         {
             m_infoLookup = new Dictionary<Guid, UnknownTile>();
             m_activeFinesses = new List<Finesse>();
+            m_allowFinesses = finesse;
         }
 
-
+        /// <summary>
+        /// Get a list of all tiles that could be finessed
+        /// </summary>
         IEnumerable<Tile> GetPossibleFinesseTargets()
         {
+            // TODO: Tiles that already have high play strength shouldn't be targeted!
+
             List<Tile> playableNewTiles = new List<Tile>();
             foreach (var hand in m_lastGameState.Hands)
             {
@@ -100,9 +134,16 @@ namespace Hanabi
             return playableNewTiles;
         }
 
+        /// <summary>
+        /// Get a list of player/tile combos that we could give info on in order to finesse something else
+        /// </summary>
         IEnumerable<Tuple<int, Tile>> GetSimpleFinesses()
         {
             var playableNewTiles = GetPossibleFinesseTargets();
+
+            // TODO: Don't finesse a tile that's already been finessed
+            // TODO: Don't finesse a tile where a copy has already been info'd
+            // TODO: Return info about WHAT we're trying to finesse, then tune the info given according to that
 
             List<Tuple<int, Tile>> finesses = new List<Tuple<int, Tile>>();
             foreach(var tile in playableNewTiles)
@@ -177,17 +218,17 @@ namespace Hanabi
 
             foreach(var g in groups)
             {
-                if(g.Key.Number == 1 && g.Count() >= 3)
+                if(g.Key.Number == 1 && g.Count() >= m_lastGameState.NumCopies(g.Key.Suit, g.Key.Number))
                 {
                     // Can see all three 1s
                     eliminated.Add(g.Key);
                 }
-                else if(g.Key.Number == 5 && g.Count() >= 1)
+                else if (g.Key.Number == 5 && g.Count() >= m_lastGameState.NumCopies(g.Key.Suit, g.Key.Number))
                 {
                     // Can see the single 5
                     eliminated.Add(g.Key);
                 }
-                else if ((g.Key.Number == 2 || g.Key.Number == 3 || g.Key.Number == 4) && g.Count() >= 2)
+                else if ((g.Key.Number == 2 || g.Key.Number == 3 || g.Key.Number == 4) && g.Count() >= m_lastGameState.NumCopies(g.Key.Suit, g.Key.Number))
                 {
                     // Can see both copies of a 2/3/4
                     eliminated.Add(g.Key);
@@ -224,7 +265,26 @@ namespace Hanabi
         {
             m_lastGameState = gameState;
 
-            // TODO: delete finesses from m_activeFinesses if they no longer apply
+            if (m_allowFinesses)
+            {
+                List<Finesse> deadFinesses = new List<Finesse>();
+
+                // Cull finesses that are over now
+                foreach (var finesse in m_activeFinesses)
+                {
+                    // If both parts of the finesse are dead we can stop tracking this
+                    if (m_lastGameState.IsDead(finesse.InfoTileId) && m_lastGameState.IsDead(finesse.TargetTileId))
+                    {
+                        deadFinesses.Add(finesse);
+                    }
+                }
+
+                // Remove all the dead finesses
+                foreach (var finesse in deadFinesses)
+                {
+                    m_activeFinesses.Remove(finesse);
+                }
+            }
 
             foreach(var hand in gameState.Hands)
             {
@@ -249,7 +309,7 @@ namespace Hanabi
             if (m_lastGameState.History.Any())
             {
                 // Record the last thing that happened
-                RecordPlayerTurn(m_lastGameState.History.Last());
+                RecordPlayerTurn(m_lastGameState.History.Last(), m_lastGameState.History.Count());
             }
         }
 
@@ -325,7 +385,7 @@ namespace Hanabi
         /// <summary>
         /// A player took an action!
         /// </summary>
-        public void RecordPlayerTurn(Turn turn)
+        public void RecordPlayerTurn(Turn turn, int turnNumber)
         {
             // Increase the age of info
             foreach(var tile in m_infoLookup.Values)
@@ -361,72 +421,77 @@ namespace Hanabi
                             }
                         }
 
-                        if (turn.Action.TargetPlayer == PlayerIndex)
+
+                        if (m_allowFinesses)
                         {
-                            // Info was given to you, double check if it might be a finesse
-                            var finesseTargets = GetPossibleFinesseTargets();
-
-                            // TODO: it can't be a finesse if the target tile is in the info-giver's hand
-
-                            // If there are possible finesses
-                            if(finesseTargets.Any())
+                            if (turn.Action.TargetPlayer == PlayerIndex)
                             {
-                                // Possible values our info could have if they're finessing each target
-                                var infoValueList = finesseTargets.Select(t => new TileValue(t.Suit, t.Number + 1)).ToList();
+                                // Info was given to you, double check if it might be a finesse
+                                var finesseTargets = GetPossibleFinesseTargets();
 
-                                foreach(var infoTarget in turn.TargetedTiles)
+                                // Ignore any finesse targets that are in the hand of the person giving the info, they can't see those
+                                finesseTargets = finesseTargets.Where(t => m_lastGameState.WhoHas(t.UniqueId) != turn.Action.ActingPlayer);
+
+                                // If there are possible finesses
+                                if (finesseTargets.Any())
                                 {
-                                    foreach(var finesseTarget in finesseTargets)
-                                    {
-                                        var targetValueList = new TileValueList();
-                                        targetValueList.Add(new TileValue(finesseTarget.Suit, finesseTarget.Number));
+                                    // Possible values our info could have if they're finessing each target
+                                    var infoValueList = finesseTargets.Select(t => new TileValue(t.Suit, t.Number + 1)).ToList();
 
-                                        var finesse = new Finesse(infoTarget, finesseTarget.UniqueId, infoValueList, targetValueList);
-                                        m_activeFinesses.Add(finesse);
+                                    foreach (var infoTarget in turn.TargetedTiles)
+                                    {
+                                        foreach (var finesseTarget in finesseTargets)
+                                        {
+                                            var targetValueList = new TileValueList();
+                                            targetValueList.Add(new TileValue(finesseTarget.Suit, finesseTarget.Number));
+
+                                            var finesse = new Finesse(m_lastGameState, infoTarget, finesseTarget.UniqueId, infoValueList, targetValueList, turnNumber, turn.Action.ActingPlayer);
+                                            m_activeFinesses.Add(finesse);
+                                        }
                                     }
                                 }
                             }
-                        }
-                        else
-                        {
-                            // Info was given to someone else, see if you're being finessed
-
-                            var actualTiles = turn.TargetedTiles.Select(g => m_lastGameState.AllHands().First(t => t.UniqueId == g));
-
-                            // If this info give is all unplayable tiles, it's gotta be a finesse
-                            if (!actualTiles.Any(t => m_lastGameState.IsPlayable(t)))
+                            else
                             {
-                                var finesseTargets = GetPossibleFinesseTargets();
-                                var missingTargets = new List<Tile>();
+                                // Info was given to someone else, see if you're being finessed
 
-                                foreach (var target in turn.TargetedTiles)
+                                var actualTiles = turn.TargetedTiles.Select(g => m_lastGameState.AllHands().First(t => t.UniqueId == g));
+
+                                // If this info give is all unplayable tiles, it's gotta be a finesse
+                                if (!actualTiles.Any(t => m_lastGameState.IsPlayable(t)))
                                 {
-                                    // Find this info tile
-                                    var infoTile = m_lastGameState.AllHands().Where(t => t.UniqueId == target).First();
-                                    // See if the finesse targets list contains a corresponding tile
-                                    var finesseTarget = finesseTargets.Where(t => t.Suit == infoTile.Suit && t.Number == infoTile.Number - 1).FirstOrDefault();
+                                    var finesseTargets = GetPossibleFinesseTargets();
+                                    var missingTargets = new List<Tile>();
 
-                                    var infoValues = new TileValueList();
-                                    infoValues.Add(new TileValue(infoTile.Suit, infoTile.Number));
+                                    foreach (var target in turn.TargetedTiles)
+                                    {
+                                        // Find this info tile
+                                        var infoTile = m_lastGameState.AllHands().Where(t => t.UniqueId == target).First();
+                                        // See if the finesse targets list contains a corresponding tile
+                                        var finesseTarget = finesseTargets.Where(t => t.Suit == infoTile.Suit && t.Number == infoTile.Number - 1).FirstOrDefault();
 
-                                    if (finesseTarget != null)
-                                    {
-                                        var targetValues = new TileValueList();
-                                        targetValues.Add(new TileValue(finesseTarget.Suit, finesseTarget.Number));
-                                        var finesse = new Finesse(infoTile.UniqueId, finesseTarget.UniqueId, infoValues, targetValues);
-                                        m_activeFinesses.Add(finesse);
+                                        var infoValues = new TileValueList();
+                                        infoValues.Add(new TileValue(infoTile.Suit, infoTile.Number));
+
+                                        if (finesseTarget != null)
+                                        {
+                                            var targetValues = new TileValueList();
+                                            targetValues.Add(new TileValue(finesseTarget.Suit, finesseTarget.Number));
+                                            var finesse = new Finesse(m_lastGameState, infoTile.UniqueId, finesseTarget.UniqueId, infoValues, targetValues, turnNumber, turn.Action.ActingPlayer);
+                                            m_activeFinesses.Add(finesse);
+                                        }
+                                        else
+                                        {
+                                            // We must have the target!
+                                            var myNewest = m_lastGameState.YourHand.Last();
+                                            var targetValues = new TileValueList();
+                                            targetValues.Add(new TileValue(infoTile.Suit, infoTile.Number - 1));
+                                            var finesse = new Finesse(m_lastGameState, infoTile.UniqueId, myNewest, infoValues, targetValues, turnNumber, turn.Action.ActingPlayer);
+                                            m_activeFinesses.Add(finesse);
+                                        }
                                     }
-                                    else
-                                    {
-                                        // We must have the target!
-                                        var myNewest = m_lastGameState.YourHand.Last();
-                                        var targetValues = new TileValueList();
-                                        targetValues.Add(new TileValue(infoTile.Suit, infoTile.Number-1));
-                                        var finesse = new Finesse(infoTile.UniqueId, myNewest, infoValues, targetValues);
-                                        m_activeFinesses.Add(finesse);
-                                    }
+
                                 }
-
                             }
                         }
 
@@ -511,22 +576,24 @@ namespace Hanabi
             ///////////////////////////////////////////////////
             foreach(Guid g in TilesInHand(PlayerIndex))
             {
-                // Finesses
-                
-                var finesseTargetsInOurHand = m_activeFinesses.Where(f => m_lastGameState.YourHand.Contains(f.TargetTileId));
 
-                if(finesseTargetsInOurHand.Any())
+                if (m_allowFinesses)
                 {
-                    var finesse = finesseTargetsInOurHand.First();
+                    // Finesses
+                    var finesseTargetsInOurHand = m_activeFinesses.Where(f => m_lastGameState.YourHand.Contains(f.TargetTileId));
 
-                    if(finesse.PossibleTargetValues.All(v => m_lastGameState.IsPlayable(v.Item1, v.Item2)))
+                    if (finesseTargetsInOurHand.Any())
                     {
-                        var infoString = finesse.PossibleInfoValues.Aggregate("", (s, t) => s += t.Item1 + " " + t.Item2+ ", ");
-                        var playAction = PlayerAction.PlayTile(PlayerIndex, finesse.TargetTileId, String.Format("Finessed by {0}", infoString));
-                        yield return new Tuple<int, PlayerAction>(80, playAction);
+                        var finesse = finesseTargetsInOurHand.First();
+
+                        if (finesse.PossibleTargetValues.All(v => m_lastGameState.IsPlayable(v.Item1, v.Item2)))
+                        {
+                            var infoString = finesse.PossibleInfoValues.Aggregate("", (s, t) => s += t.Item1 + " " + t.Item2 + ", ");
+                            var playAction = PlayerAction.PlayTile(PlayerIndex, finesse.TargetTileId, String.Format("Finessed by {0}", infoString));
+                            yield return new Tuple<int, PlayerAction>(80, playAction);
+                        }
                     }
                 }
-                
                 // Other Info
 
                 var lookup = Lookup(g);
@@ -536,10 +603,8 @@ namespace Hanabi
                 bool isPlayable = lookup.IsDefinitelyPlayable(m_lastGameState);
                 if (isPlayable || (playStrength && !isUnplayable))
                 {
-                    // TODO: Check to see if it's part of a finesse
-
                     string log = "";
-                    if(isPlayable)
+                    if (isPlayable)
                     {
                         log = String.Format("This tile should be playable ({0})", lookup.ToString());
                     }
@@ -547,6 +612,41 @@ namespace Hanabi
                     {
                         log = String.Format("PlayStrength is {0}", lookup.PlayStrength);
                     }
+
+                    if (m_activeFinesses.Where(f => f.InfoTileId == g).Any())
+                    {
+                        // Check to see if this has play strength because it's the info part of a finesse
+                        Finesse finesse = m_activeFinesses.Where(f => f.InfoTileId == g).First();
+                        int currTurn = m_lastGameState.History.Count() + 1;
+
+                        // If the target has had a chance to act
+                        if (currTurn > finesse.TurnTargetShouldAct)
+                        {
+                            var target = finesse.PossibleTargetValues.First();
+                            // If the target tile of this finesse was played
+                            if (m_lastGameState.Play.Where(t => t.UniqueId == finesse.TargetTileId).Any())
+                            {
+                                // Awesome! This is probably playable!
+                                log = String.Format("Was used to finesse the {0} {1} which was played!", target.Item1, target.Item2);
+                            }
+                            else
+                            {
+                                // There's been enough time but the finessed person didn't play
+                                // Therefore this is probably not a finesse
+                                // Remove the finesse from our list and keep assuming this tile is playable
+                                m_activeFinesses.Remove(finesse);
+                                log = String.Format("Thought this was finessing the {0} {1} but apparently not!", target.Item1, target.Item2);
+                            }
+                        }
+                        else
+                        {
+                            // Hasn't been long enough for the finesse target to act yet
+                            // So delay - skip considering this tile playable for now, but don't change any bookkeeping
+                            continue;
+                        }
+
+                    }
+
                     var playAction = PlayerAction.PlayTile(PlayerIndex, g, log);
                     yield return new Tuple<int, PlayerAction>(lookup.PlayStrength, playAction);
                 }
@@ -567,16 +667,19 @@ namespace Hanabi
             // TODO: don't wait until 0 tokens, maybe
             if (m_lastGameState.Tokens > 0)
             {
-                var finesses = GetSimpleFinesses().OrderBy(t => t.Item2.Number);
-
-                foreach (var combo in finesses)
+                if (m_allowFinesses)
                 {
-                    var info = ChooseBestInfoForTile(combo.Item1, combo.Item2, "Finesse!");
-                    if (info != null)
+                    var finesses = GetSimpleFinesses().OrderBy(t => t.Item2.Number);
+
+                    foreach (var combo in finesses)
                     {
-                        // Add bonus strength for this being a finesse
-                        var newInfo = new Tuple<int, PlayerAction>(info.Item1 + 20, info.Item2);
-                        yield return newInfo;
+                        var info = ChooseBestInfoForTile(combo.Item1, combo.Item2, "Finesse!");
+                        if (info != null)
+                        {
+                            // Add bonus strength for this being a finesse
+                            var newInfo = new Tuple<int, PlayerAction>(info.Item1 + 20, info.Item2);
+                            yield return newInfo;
+                        }
                     }
                 }
 
